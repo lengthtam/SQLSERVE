@@ -261,12 +261,12 @@ HOMEWORK:
           LEFT JOIN DuAn D ON C.MaCongTy = D.MaCongTy
           GROUP BY C.TenCongTy;
           --15. Tìm kỹ năng được sở hữu bởi nhiều chuyên gia nhất.       
-          SELECT K.TenKyNang
-          FROM ChuyenGia_KyNang CGK
-          JOIN KyNang K ON CGK.MaKyNang = K.MaKyNang
+          SELECT TOP 1 K.TenKyNang
+          FROM KyNang K
+          JOIN ChuyenGia_KyNang CGK ON K.MaKyNang = CGK.MaKyNang
           GROUP BY K.TenKyNang
-          ORDER BY COUNT(CGK.MaChuyenGia) DESC
-          LIMIT 1;
+          ORDER BY COUNT(CGK.MaChuyenGia) DESC;
+
           --16. Liệt kê tên các chuyên gia có kỹ năng 'Python' với cấp độ từ 4 trở lên.     
           SELECT CG.HoTen
           FROM ChuyenGia CG
