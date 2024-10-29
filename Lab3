@@ -274,12 +274,12 @@ HOMEWORK:
           JOIN KyNang K ON CGK.MaKyNang = K.MaKyNang
           WHERE K.TenKyNang = 'Python' AND CGK.CapDo >= 4;
           --17. Tìm dự án có nhiều chuyên gia tham gia nhất.      
-          SELECT D.TenDuAn
+          
+          SELECT TOP 1 D.TenDuAn, COUNT(CG.MaChuyenGia) AS SoLuongChuyenGia
           FROM DuAn D
-          JOIN ChuyenGia_DuAn CGD ON D.MaDuAn = CGD.MaDuAn
+          JOIN ChuyenGia_DuAn CG ON D.MaDuAn = CG.MaDuAn
           GROUP BY D.TenDuAn
-          ORDER BY COUNT(CGD.MaChuyenGia) DESC
-          LIMIT 1;
+          ORDER BY COUNT(CG.MaChuyenGia) DESC;
           --18. Hiển thị tên và số lượng kỹ năng của mỗi chuyên gia.        
           SELECT CG.HoTen, COUNT(CGK.MaKyNang) AS SoLuongKyNang
           FROM ChuyenGia CG
@@ -330,25 +330,23 @@ HOMEWORK:
           WHERE K2.TenKyNang IS NULL;
 
           --76. Tìm chuyên gia có số lượng kỹ năng nhiều nhất.     
-          SELECT CG.HoTen
-          FROM ChuyenGia CG
-          JOIN ChuyenGia_KyNang CGK ON CG.MaChuyenGia = CGK.MaChuyenGia
-          GROUP BY CG.HoTen
-          ORDER BY COUNT(CGK.MaKyNang) DESC
-          LIMIT 1;
+          SELECT TOP 1 C.HoTen, COUNT(CGK.MaKyNang) AS SoLuongKyNang
+          FROM ChuyenGia C
+          JOIN ChuyenGia_KyNang CGK ON C.MaChuyenGia = CGK.MaChuyenGia
+          GROUP BY C.HoTen
+          ORDER BY COUNT(CGK.MaKyNang) DESC;
           --77. Liệt kê các cặp chuyên gia có cùng chuyên ngành.        
           SELECT A.HoTen AS ChuyenGia1, B.HoTen AS ChuyenGia2
           FROM ChuyenGia A
           JOIN ChuyenGia B ON A.ChuyenNganh = B.ChuyenNganh AND A.MaChuyenGia < B.MaChuyenGia;
           --78. Tìm công ty có tổng số năm kinh nghiệm của các chuyên gia trong dự án cao nhất.          
-          SELECT C.TenCongTy
-          FROM CongTy C
-          JOIN DuAn D ON C.MaCongTy = D.MaCongTy
-          JOIN ChuyenGia_DuAn CGD ON D.MaDuAn = CGD.MaDuAn
+          SELECT TOP 1 CT.TenCongTy, SUM(CG.NamKinhNghiem) AS TongNamKinhNghiem
+          FROM CongTy CT
+          JOIN DuAn DA ON CT.MaCongTy = DA.MaCongTy
+          JOIN ChuyenGia_DuAn CGD ON DA.MaDuAn = CGD.MaDuAn
           JOIN ChuyenGia CG ON CGD.MaChuyenGia = CG.MaChuyenGia
-          GROUP BY C.TenCongTy
-          ORDER BY SUM(CG.NamKinhNghiem) DESC
-          LIMIT 1;
+          GROUP BY CT.TenCongTy
+          ORDER BY SUM(CG.NamKinhNghiem) DESC;
           --79. Tìm kỹ năng được sở hữu bởi tất cả các chuyên gia.       
           SELECT K.TenKyNang
           FROM KyNang K
