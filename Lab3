@@ -311,7 +311,7 @@ HOMEWORK:
           SELECT CG.HoTen
           FROM ChuyenGia CG
           JOIN ChuyenGia_KyNang CGK ON CG.MaChuyenGia = CGK.MaChuyenGia
-          GROUP BY CG.MaChuyenGia
+          GROUP BY CG.MaChuyenGia, CG.HoTen
           HAVING COUNT(CGK.MaKyNang) >= 3;
           --24. Hiển thị tên công ty và tổng số năm kinh nghiệm của tất cả chuyên gia trong các dự án của công ty đó.       
           SELECT C.TenCongTy, SUM(CG.NamKinhNghiem) AS TongNamKinhNghiem
