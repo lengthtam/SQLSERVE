@@ -1,0 +1,401 @@
+
+-- 101. Tạo một trigger để tự động cập nhật trường NgayCapNhat trong bảng ChuyenGia mỗi khi có sự thay đổi thông tin.
+
+ALTER TABLE ChuyenGia
+ADD NgayCapNhat SMALLDATETIME NULL
+GO
+
+CREATE TRIGGER trg_Update_NgayCapNhat
+ON ChuyenGia
+AFTER UPDATE
+AS
+BEGIN
+    UPDATE ChuyenGia
+    SET NgayCapNhat = GETDATE()
+    FROM ChuyenGia
+    INNER JOIN Inserted ON ChuyenGia.MaChuyenGia = Inserted.MaChuyenGia;
+END;
+GO
+-- 102. Tạo một trigger để ghi log mỗi khi có sự thay đổi trong bảng DuAn.
+
+CREATE TRIGGER trg_DuAn_Log
+ON DuAn
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Log cho thao tác INSERT
+    IF EXISTS (SELECT * FROM inserted) AND NOT EXISTS (SELECT * FROM deleted)
+    BEGIN
+        INSERT INTO DuAn_Log (MaDuAn, TenDuAn, MaCongTy, NgayBatDau, NgayKetThuc, TrangThai, ThaoTac)
+        SELECT MaDuAn, TenDuAn, MaCongTy, NgayBatDau, NgayKetThuc, TrangThai, 'INSERT'
+        FROM inserted;
+    END
+
+    -- Log cho thao tác DELETE
+    IF EXISTS (SELECT * FROM deleted) AND NOT EXISTS (SELECT * FROM inserted)
+    BEGIN
+        INSERT INTO DuAn_Log (MaDuAn, TenDuAn, MaCongTy, NgayBatDau, NgayKetThuc, TrangThai, ThaoTac)
+        SELECT MaDuAn, TenDuAn, MaCongTy, NgayBatDau, NgayKetThuc, TrangThai, 'DELETE'
+        FROM deleted;
+    END
+
+    -- Log cho thao tác UPDATE
+    IF EXISTS (SELECT * FROM inserted) AND EXISTS (SELECT * FROM deleted)
+    BEGIN
+        INSERT INTO DuAn_Log (MaDuAn, TenDuAn, MaCongTy, NgayBatDau, NgayKetThuc, TrangThai, ThaoTac)
+        SELECT MaDuAn, TenDuAn, MaCongTy, NgayBatDau, NgayKetThuc, TrangThai, 'UPDATE'
+        FROM inserted;
+    END
+END;
+
+-- 103. Tạo một trigger để đảm bảo rằng một chuyên gia không thể tham gia vào quá 5 dự án cùng một lúc.
+CREATE TRIGGER trg_LimitProjectsPerExpert
+ON ChuyenGia_DuAn
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Kiểm tra số lượng dự án của mỗi chuyên gia trong bảng inserted
+    IF EXISTS (
+        SELECT i.MaChuyenGia
+        FROM inserted i
+        GROUP BY i.MaChuyenGia
+        HAVING (SELECT COUNT(*) 
+                FROM ChuyenGia_DuAn 
+                WHERE MaChuyenGia = i.MaChuyenGia) > 5
+    )
+    BEGIN
+        -- Nếu chuyên gia vượt quá 5 dự án, rollback và báo lỗi
+        RAISERROR (N'Một chuyên gia không thể tham gia vào hơn 5 dự án cùng một lúc.', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+   
+-- 104. Tạo một trigger để tự động cập nhật số lượng nhân viên trong bảng CongTy mỗi khi có sự thay đổi trong bảng ChuyenGia.
+
+CREATE TRIGGER trg_UpdateEmployeeCount
+ON ChuyenGia
+AFTER INSERT, DELETE, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Cập nhật số lượng nhân viên cho các công ty liên quan khi có dữ liệu được thêm mới
+    IF EXISTS (SELECT * FROM inserted)
+    BEGIN
+        UPDATE CongTy
+        SET SoNhanVien = (
+            SELECT COUNT(*)
+            FROM ChuyenGia
+            WHERE MaCongTy = inserted.MaCongTy
+        )
+        WHERE MaCongTy IN (SELECT DISTINCT MaCongTy FROM inserted);
+    END
+
+    -- Cập nhật số lượng nhân viên cho các công ty liên quan khi có dữ liệu bị xóa
+    IF EXISTS (SELECT * FROM deleted)
+    BEGIN
+        UPDATE CongTy
+        SET SoNhanVien = (
+            SELECT COUNT(*)
+            FROM ChuyenGia
+            WHERE MaCongTy = deleted.MaCongTy
+        )
+        WHERE MaCongTy IN (SELECT DISTINCT MaCongTy FROM deleted);
+    END
+END;
+
+-- 105. Tạo một trigger để ngăn chặn việc xóa các dự án đã hoàn thành.
+CREATE TRIGGER trg_prevent_delete_completed_projects
+BEFORE DELETE ON DuAn
+FOR EACH ROW
+BEGIN
+    IF OLD.TrangThai = 'Hoàn thành' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Không thể xóa dự án đã hoàn thành.';
+    END IF;
+END;
+
+-- 106. Tạo một trigger để tự động cập nhật cấp độ kỹ năng của chuyên gia khi họ tham gia vào một dự án mới.
+CREATE TRIGGER trg_update_expert_skill_level
+AFTER INSERT ON ChuyenGia_DuAn
+FOR EACH ROW
+BEGIN
+    UPDATE ChuyenGia_KyNang
+    SET CapDo = (SELECT MAX(CapDo) FROM DuAn WHERE MaDuAn = NEW.MaDuAn)
+    WHERE MaChuyenGia = NEW.MaChuyenGia;
+END;
+
+-- 107. Tạo một trigger để ghi log mỗi khi có sự thay đổi cấp độ kỹ năng của chuyên gia.
+CREATE TRIGGER trg_log_skill_level_changes
+AFTER UPDATE ON ChuyenGia_KyNang
+FOR EACH ROW
+BEGIN
+    INSERT INTO LogChanges (TableName, ActionType, DateTime, Description)
+    VALUES ('ChuyenGia_KyNang', 'UPDATE', NOW(), 
+            CONCAT('Cấp độ kỹ năng của chuyên gia ', OLD.MaChuyenGia, ' đã thay đổi từ ', OLD.CapDo, ' thành ', NEW.CapDo));
+END;
+
+-- 108. Tạo một trigger để đảm bảo rằng ngày kết thúc của dự án luôn lớn hơn ngày bắt đầu.
+CREATE TRIGGER trg_validate_project_dates
+BEFORE INSERT, UPDATE ON DuAn
+FOR EACH ROW
+BEGIN
+    IF NEW.NgayKetThuc <= NEW.NgayBatDau THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ngày kết thúc phải lớn hơn ngày bắt đầu.';
+    END IF;
+END;
+
+-- 109. Tạo một trigger để tự động xóa các bản ghi liên quan trong bảng ChuyenGia_KyNang khi một kỹ năng bị xóa.
+CREATE TRIGGER trg_delete_related_skill_entries
+AFTER DELETE ON KyNang
+FOR EACH ROW
+BEGIN
+    DELETE FROM ChuyenGia_KyNang WHERE MaKyNang = OLD.MaKyNang;
+END;
+
+-- 110. Tạo một trigger để đảm bảo rằng một công ty không thể có quá 10 dự án đang thực hiện cùng một lúc.
+CREATE TRIGGER trg_limit_company_projects
+BEFORE INSERT ON DuAn
+FOR EACH ROW
+BEGIN
+    DECLARE project_count INT;
+    SELECT COUNT(*) INTO project_count
+    FROM DuAn
+    WHERE MaCongTy = NEW.MaCongTy AND TrangThai = 'Đang thực hiện';
+    
+    IF project_count >= 10 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Công ty không thể có quá 10 dự án đang thực hiện cùng lúc.';
+    END IF;
+END;
+
+-- 123. Tạo một trigger để tự động cập nhật lương của chuyên gia dựa trên cấp độ kỹ năng và số năm kinh nghiệm.
+CREATE TRIGGER trg_update_expert_salary
+AFTER INSERT ON ChuyenGia_KyNang
+FOR EACH ROW
+BEGIN
+    UPDATE ChuyenGia
+    SET Luong = (SELECT Luong FROM LuongChuyenGia WHERE CapDo = NEW.CapDo AND NamKinhNghiem = NEW.NamKinhNghiem)
+    WHERE MaChuyenGia = NEW.MaChuyenGia;
+END;
+
+-- 124. Tạo một trigger để tự động gửi thông báo khi một dự án sắp đến hạn (còn 7 ngày).
+CREATE TABLE ThongBao (
+    MaThongBao INT AUTO_INCREMENT PRIMARY KEY,
+    NoiDung TEXT,
+    NgayThongBao DATETIME
+);
+
+CREATE TRIGGER trg_notify_project_deadline
+AFTER UPDATE ON DuAn
+FOR EACH ROW
+BEGIN
+    IF DATEDIFF(NEW.NgayKetThuc, NOW()) = 7 THEN
+        INSERT INTO ThongBao (NoiDung, NgayThongBao)
+        VALUES (CONCAT('Dự án ', NEW.TenDuAn, ' sắp đến hạn vào ', NEW.NgayKetThuc), NOW());
+    END IF;
+END;
+
+-- 125. Tạo một trigger để ngăn chặn việc xóa hoặc cập nhật thông tin của chuyên gia đang tham gia dự án.
+CREATE TRIGGER trg_prevent_expert_modification
+BEFORE UPDATE, DELETE ON ChuyenGia
+FOR EACH ROW
+BEGIN
+    IF EXISTS (SELECT * FROM ChuyenGia_DuAn WHERE MaChuyenGia = OLD.MaChuyenGia) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Không thể xóa hoặc cập nhật thông tin của chuyên gia đang tham gia dự án.';
+    END IF;
+END;
+
+-- 126. Tạo một trigger để tự động cập nhật số lượng chuyên gia trong mỗi chuyên ngành.
+CREATE TABLE ThongKeChuyenNganh (
+    MaChuyenNganh INT,
+    SoLuongChuyenGia INT,
+    PRIMARY KEY (MaChuyenNganh)
+);
+
+CREATE TRIGGER trg_update_expert_count
+AFTER INSERT, DELETE ON ChuyenGia
+FOR EACH ROW
+BEGIN
+    UPDATE ThongKeChuyenNganh
+    SET SoLuongChuyenGia = (SELECT COUNT(*) FROM ChuyenGia WHERE ChuyenNganh = NEW.ChuyenNganh)
+    WHERE MaChuyenNganh = NEW.MaChuyenNganh;
+END;
+
+-- 127. Tạo một trigger để tự động tạo bản sao lưu của dự án khi nó được đánh dấu là hoàn thành.
+CREATE TABLE DuAnHoanThanh (
+    MaDuAn INT,
+    TenDuAn NVARCHAR(255),
+    NgayBatDau DATE,
+    NgayKetThuc DATE,
+    PRIMARY KEY (MaDuAn)
+);
+
+CREATE TRIGGER trg_backup_completed_projects
+AFTER UPDATE ON DuAn
+FOR EACH ROW
+BEGIN
+    IF NEW.TrangThai = 'Hoàn thành' THEN
+        INSERT INTO DuAnHoanThanh (MaDuAn, TenDuAn, NgayBatDau, NgayKetThuc)
+        VALUES (NEW.MaDuAn, NEW.TenDuAn, NEW.NgayBatDau, NEW.NgayKetThuc);
+    END IF;
+END;
+
+-- 128. Tạo một trigger để tự động cập nhật điểm đánh giá trung bình của công ty dựa trên điểm đánh giá của các dự án.
+CREATE TRIGGER trg_update_company_rating
+AFTER UPDATE ON DuAn
+FOR EACH ROW
+BEGIN
+    UPDATE CongTy
+    SET DiemDanhGia = (SELECT AVG(DiemDanhGia) FROM DuAn WHERE MaCongTy = NEW.MaCongTy)
+    WHERE MaCongTy = NEW.MaCongTy;
+END;
+
+-- 129. Tạo một trigger để tự động phân công chuyên gia vào dự án dựa trên kỹ năng và kinh nghiệm.
+CREATE TRIGGER trg_assign_expert_to_project
+AFTER INSERT ON DuAn
+FOR EACH ROW
+BEGIN
+    INSERT INTO ChuyenGia_DuAn (MaDuAn, MaChuyenGia)
+    SELECT NEW.MaDuAn, MaChuyenGia FROM ChuyenGia_KyNang
+    WHERE MaKyNang IN (SELECT MaKyNang FROM DuAn WHERE MaDuAn = NEW.MaDuAn)
+    AND NamKinhNghiem >= NEW.YeuCauKinhNghiem;
+END;
+
+-- 130. Tạo một trigger để tự động cập nhật trạng thái "bận" của chuyên gia khi họ được phân công vào dự án mới.
+CREATE TRIGGER trg_update_expert_status
+AFTER INSERT ON ChuyenGia_DuAn
+FOR EACH ROW
+BEGIN
+    UPDATE ChuyenGia
+    SET TrangThai = 'Bận'
+    WHERE MaChuyenGia = NEW.MaChuyenGia;
+END;
+
+-- 131. Tạo một trigger để ngăn chặn việc thêm kỹ năng trùng lặp cho một chuyên gia.
+CREATE TRIGGER trg_prevent_duplicate_skill
+BEFORE INSERT ON ChuyenGia_KyNang
+FOR EACH ROW
+BEGIN
+    IF EXISTS (SELECT * FROM ChuyenGia_KyNang WHERE MaChuyenGia = NEW.MaChuyenGia AND MaKyNang = NEW.MaKyNang) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Kỹ năng này đã được thêm cho chuyên gia này.';
+    END IF;
+END;
+
+-- 132. Tạo một trigger để tự động tạo báo cáo tổng kết khi một dự án kết thúc.
+CREATE TRIGGER trg_generate_project_report
+AFTER UPDATE ON DuAn
+FOR EACH ROW
+BEGIN
+    IF NEW.TrangThai = 'Hoàn thành' THEN
+        INSERT INTO BaoCaoDuAn (MaDuAn, NoiDungBaoCao)
+        VALUES (NEW.MaDuAn, CONCAT('Dự án ', NEW.TenDuAn, ' đã hoàn thành vào ', NEW.NgayKetThuc));
+    END IF;
+END;
+
+-- 133. Tạo một trigger để tự động cập nhật thứ hạng của công ty dựa trên số lượng dự án hoàn thành và điểm đánh giá.
+CREATE TRIGGER trg_update_company_ranking
+AFTER UPDATE ON DuAn
+FOR EACH ROW
+BEGIN
+    UPDATE CongTy
+    SET XepHang = (SELECT COUNT(*) FROM DuAn WHERE MaCongTy = NEW.MaCongTy AND TrangThai = 'Hoàn thành') +
+                 (SELECT AVG(DiemDanhGia) FROM DuAn WHERE MaCongTy = NEW.MaCongTy)
+    WHERE MaCongTy = NEW.MaCongTy;
+END;
+
+-- 134. Tạo một trigger để tự động gửi thông báo khi một chuyên gia được thăng cấp (dựa trên số năm kinh nghiệm).
+CREATE TRIGGER trg_notify_expert_promotion
+AFTER UPDATE ON ChuyenGia
+FOR EACH ROW
+BEGIN
+    IF OLD.NamKinhNghiem < NEW.NamKinhNghiem THEN
+        INSERT INTO ThongBao (NoiDung, NgayThongBao)
+        VALUES (CONCAT('Chuyên gia ', NEW.HoTen, ' đã được thăng cấp với ', NEW.NamKinhNghiem, ' năm kinh nghiệm'), NOW());
+    END IF;
+END;
+
+-- 135. Tạo một trigger để tự động cập nhật trạng thái "khẩn cấp" cho dự án khi thời gian còn lại ít hơn 10% tổng thời gian dự án.
+CREATE TRIGGER trg_update_project_urgent
+AFTER UPDATE ON DuAn
+FOR EACH ROW
+BEGIN
+    IF DATEDIFF(NEW.NgayKetThuc, NOW()) < (0.1 * DATEDIFF(NEW.NgayKetThuc, NEW.NgayBatDau)) THEN
+        UPDATE DuAn SET TrangThai = 'Khẩn cấp' WHERE MaDuAn = NEW.MaDuAn;
+    END IF;
+END;
+
+-- 136. Tạo một trigger để tự động cập nhật số lượng dự án đang thực hiện của mỗi chuyên gia.
+CREATE TRIGGER trg_update_expert_project_count
+AFTER INSERT, DELETE ON ChuyenGia_DuAn
+FOR EACH ROW
+BEGIN
+    DECLARE project_count INT;
+    SELECT COUNT(*) INTO project_count
+    FROM ChuyenGia_DuAn
+    WHERE MaChuyenGia = NEW.MaChuyenGia AND TrangThai = 'Đang thực hiện';
+    
+    UPDATE ChuyenGia
+    SET SoDuAnDangThucHien = project_count
+    WHERE MaChuyenGia = NEW.MaChuyenGia;
+END;
+
+-- 137. Tạo một trigger để tự động tính toán và cập nhật tỷ lệ thành công của công ty dựa trên số dự án hoàn thành và tổng số dự án.
+CREATE TRIGGER trg_update_company_success_rate
+AFTER UPDATE ON DuAn
+FOR EACH ROW
+BEGIN
+    DECLARE completed_projects INT;
+    DECLARE total_projects INT;
+    SELECT COUNT(*) INTO completed_projects FROM DuAn WHERE MaCongTy = NEW.MaCongTy AND TrangThai = 'Hoàn thành';
+    SELECT COUNT(*) INTO total_projects FROM DuAn WHERE MaCongTy = NEW.MaCongTy;
+    
+    UPDATE CongTy
+    SET TyLeThanhCong = completed_projects / total_projects * 100
+    WHERE MaCongTy = NEW.MaCongTy;
+END;
+
+-- 138. Tạo một trigger để tự động ghi log mỗi khi có thay đổi trong bảng lương của chuyên gia.
+CREATE TRIGGER trg_log_salary_changes
+AFTER UPDATE ON ChuyenGia
+FOR EACH ROW
+BEGIN
+    INSERT INTO LogChanges (TableName, ActionType, DateTime, Description)
+    VALUES ('ChuyenGia', 'UPDATE', NOW(), 
+            CONCAT('Lương của chuyên gia ', OLD.MaChuyenGia, ' đã thay đổi từ ', OLD.Luong, ' thành ', NEW.Luong));
+END;
+
+-- 139. Tạo một trigger để tự động cập nhật số lượng chuyên gia cấp cao trong mỗi công ty.
+CREATE TRIGGER trg_update_high_level_experts
+AFTER INSERT, DELETE ON ChuyenGia
+FOR EACH ROW
+BEGIN
+    DECLARE high_level_count INT;
+    SELECT COUNT(*) INTO high_level_count
+    FROM ChuyenGia
+    WHERE MaCongTy = NEW.MaCongTy AND CapDo = 'Cao';
+    
+    UPDATE CongTy
+    SET SoChuyenGiaCapCao = high_level_count
+    WHERE MaCongTy = NEW.MaCongTy;
+END;
+
+-- 140. Tạo một trigger để tự động phân công chuyên gia vào dự án khi có dự án mới được tạo.
+CREATE TRIGGER trg_auto_assign_expert_to_new_project
+ON DuAn
+AFTER INSERT
+AS
+BEGIN
+    DECLARE @MaDuAn INT;
+
+    -- Lấy giá trị MaDuAn từ bảng inserted
+    SELECT @MaDuAn = MaDuAn FROM inserted;
+
+    -- Thực hiện phân công chuyên gia vào dự án
+    INSERT INTO ChuyenGia_DuAn (MaDuAn, MaChuyenGia)
+    SELECT @MaDuAn, MaChuyenGia
+    FROM ChuyenGia_KyNang
+    WHERE NamKinhNghiem >= (SELECT YeuCauKinhNghiem FROM DuAn WHERE MaDuAn = @MaDuAn);
+END;
